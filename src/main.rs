@@ -96,7 +96,6 @@ fn reciever_loop(mut socket: impl Receiver, report_interval: u8) -> ! {
         } else {
             handler.reset();
         }
-        sleep(Duration::from_micros(10));
     }
 }
 
@@ -172,7 +171,7 @@ fn main() -> Result<()> {
         ) => sender_loop(
             UnicastSender::new(addr, port, args.bind)?,
             mtu - 28,
-            OverTimeLimiter::new(bandwidth, mtu),
+            StaticLimiter::new(bandwidth, mtu),
         ),
         (
             Commands::Client {

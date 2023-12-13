@@ -12,6 +12,7 @@ pub struct OverTimeLimiter {
     time: Instant,
 }
 
+#[allow(unused)]
 impl OverTimeLimiter {
     pub fn new(speed: u32, mtu: u16) -> Self {
         Self {
@@ -44,7 +45,11 @@ pub struct StaticLimiter {
 impl StaticLimiter {
     pub fn new(speed: u32, mtu: u16) -> Self {
         Self {
-            dur: Duration::from_micros(1_000_000 / ((speed as u64 * 1024 / 8) / mtu as u64)),
+            dur: Duration::from_micros(if speed == 0 {
+                0
+            } else {
+                1_000_000 / ((speed as u64 * 1024 / 8) / mtu as u64)
+            }),
         }
     }
 }

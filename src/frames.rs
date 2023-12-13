@@ -41,13 +41,17 @@ impl FrameHandler {
         self.statistics = Default::default();
         self.start_time = None;
     }
+    /// Handle incoming frame
+    ///
+    /// Takes a null-terminated slice representing the whole frame
     pub fn handle(&mut self, frame: &[u8]) -> () {
         if let None = self.start_time {
             self.start_time = Some(Instant::now());
         }
-        let frame = &frame[..frame.len() - 1];
-        let frame = if let Ok(size) = decode(frame, &mut self.buf) {
-            &self.buf[..size]
+        let length = frame.len();
+        let frame = &frame[..length - 1]; // Cut null-terminator
+        let frame = if let Ok(decoded_len) = decode(frame, &mut self.buf) {
+            &self.buf[..decoded_len]
         } else {
             self.statistics.invalid += 1;
             println!("Invalid because can't decode");
@@ -59,32 +63,22 @@ impl FrameHandler {
             println!("Invalid because can't read counter");
             return ()
         };
-        let Ok(length) = TryInto::<[u8; 4]>::try_into(&frame[4..8]) else {
-            self.statistics.invalid += 1;
-            println!("Invalid because can't read length");
-            return ()
-        };
         let counter = u32::from_be_bytes(counter);
-        let length = u32::from_be_bytes(length);
-        if length as usize > frame.len() {
-            self.statistics.invalid += 1;
-            println!("Invalid because length is wrong: {}", frame.len());
-            return ();
-        };
         match counter.cmp(&self.counter) {
             std::cmp::Ordering::Less => {
+                // println!("Behind");
                 self.statistics.out_of_order += 1;
                 self.counter = self.counter.wrapping_sub(1);
                 self.statistics.lost = self.statistics.lost.saturating_sub(1);
             }
             std::cmp::Ordering::Equal => {}
             std::cmp::Ordering::Greater => {
-                // println!("Ahead")
+                // println!("Ahead");
                 self.statistics.lost += Into::<u64>::into(counter - &self.counter);
                 self.counter = counter;
             }
         }
-        let data = &frame[8..];
+        let data = &frame[4..];
         for i in data.chunks(SEQUNCE.len()) {
             if i.len() == SEQUNCE.len() {
                 if i != SEQUNCE {
@@ -94,7 +88,7 @@ impl FrameHandler {
             } else {
                 if &SEQUNCE[..i.len()] == i {
                     self.statistics.valid += 1;
-                    self.total_received += Into::<u64>::into(length);
+                    self.total_received += TryInto::<u64>::try_into(length).unwrap_or_default();
                     return ();
                 } else {
                     // println!("Improper end chunk");
@@ -132,6 +126,7 @@ pub struct FrameBuilder {
 }
 
 impl FrameBuilder {
+    /// Returns null-terminated slice presenting a cobs-encoded sequential frame
     pub fn next(&mut self) -> &[u8] {
         self.counter = self.counter.wrapping_add(1);
         let counter = &mut self.buf[0..4];
@@ -139,17 +134,15 @@ impl FrameBuilder {
         self.total_send += self.buf.len() as u64;
         let res = encode(&self.buf, &mut self.cobs_encoded);
         self.cobs_encoded[res] = 0;
-        // &self.buf
         &self.cobs_encoded[..=res]
     }
+    /// Geterates payload for frame builed
     pub fn new(mtu: u16) -> Self {
         const COBS_OVERHEAD: u16 = 2;
         let mut buf = vec![0_u8; Into::<usize>::into(mtu - COBS_OVERHEAD)].into_boxed_slice();
         let buf2 = vec![0_u8; max_encoding_length(buf.len())].into_boxed_slice();
-        let l = buf.len() as u32;
-        let length = &mut buf[4..8];
-        length.copy_from_slice(&l.to_be_bytes());
-        let data = &mut buf[8..];
+
+        let data = &mut buf[4..];
         let mut seq_iter = SEQUNCE.iter().cycle();
         data.fill_with(|| *seq_iter.next().expect("Endless iterator"));
         Self {
@@ -166,5 +159,21 @@ impl FrameBuilder {
             return 0;
         }
         (self.total_send / 1024) * 8 / dur
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore] // Takes a long time
+    /// It's assumed in the code above, that COBS overhead will always be 2 for
+    /// current SEQENCE, if the sequence changes, COBS might give a bigger overhead.
+    fn test_cobs_overhead() {
+        let mut builder = FrameBuilder::new(1500);
+        for _ in (0..=u32::MAX).step_by(1) {
+            assert_eq!(builder.next().len(), 1500)
+        }
     }
 }
