@@ -1,16 +1,20 @@
+use cobs::{decode, encode, max_encoding_length};
+/// Module for frame generation and handling
 use std::time::Instant;
 
+/// Maximum possible size of one frame (MTU=u16::MAX)
+const MAX_FRAME_SIZE: usize = 65536;
+
+/// Repeatable sequence to fill the frame data
 const SEQUNCE: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 
-// const TEST_SEQUNCE: [u8; 16] = [
-//     b'l', b'm', b'a', b'o', b'l', b'm', b'a', b'o', b'l', b'm', b'a', b'o', b'l', b'm', b'a', b'o',
-// ];
-
+/// Handles incoming frames and checks frame content for validity
 pub struct FrameHandler {
     counter: u32,
     statistics: FrameStatistics,
     start_time: Option<Instant>,
     total_received: u64,
+    buf: Box<[u8]>,
 }
 
 #[derive(Default, Debug)]
@@ -29,6 +33,7 @@ impl FrameHandler {
             statistics: Default::default(),
             start_time: None,
             total_received: 0,
+            buf: vec![0; MAX_FRAME_SIZE].into_boxed_slice(),
         }
     }
     pub fn reset(&mut self) {
@@ -40,25 +45,36 @@ impl FrameHandler {
         if let None = self.start_time {
             self.start_time = Some(Instant::now());
         }
-        (self.counter, _) = self.counter.overflowing_add(1);
+        let frame = &frame[..frame.len() - 1];
+        let frame = if let Ok(size) = decode(frame, &mut self.buf) {
+            &self.buf[..size]
+        } else {
+            self.statistics.invalid += 1;
+            println!("Invalid because can't decode");
+            return ();
+        };
+        self.counter = self.counter.wrapping_add(1);
         let Ok(counter) = TryInto::<[u8; 4]>::try_into(&frame[0..4]) else {
             self.statistics.invalid += 1;
+            println!("Invalid because can't read counter");
             return ()
         };
         let Ok(length) = TryInto::<[u8; 4]>::try_into(&frame[4..8]) else {
             self.statistics.invalid += 1;
+            println!("Invalid because can't read length");
             return ()
         };
         let counter = u32::from_be_bytes(counter);
         let length = u32::from_be_bytes(length);
-        if length as usize != frame.len() {
+        if length as usize > frame.len() {
             self.statistics.invalid += 1;
+            println!("Invalid because length is wrong: {}", frame.len());
             return ();
         };
         match counter.cmp(&self.counter) {
             std::cmp::Ordering::Less => {
                 self.statistics.out_of_order += 1;
-                (self.counter, _) = self.counter.overflowing_sub(1);
+                self.counter = self.counter.wrapping_sub(1);
                 self.statistics.lost = self.statistics.lost.saturating_sub(1);
             }
             std::cmp::Ordering::Equal => {}
@@ -104,23 +120,32 @@ impl FrameHandler {
     }
 }
 
+/// Frame Generator
+///
+/// every next() call returns a slice into the same buffer with modified sequence number
 pub struct FrameBuilder {
     counter: u32,
     buf: Box<[u8]>,
     start_time: Instant,
     total_send: u64,
+    cobs_encoded: Box<[u8]>,
 }
 
 impl FrameBuilder {
     pub fn next(&mut self) -> &[u8] {
-        (self.counter, _) = self.counter.overflowing_add(1);
+        self.counter = self.counter.wrapping_add(1);
         let counter = &mut self.buf[0..4];
         counter.copy_from_slice(&self.counter.to_be_bytes());
         self.total_send += self.buf.len() as u64;
-        &self.buf
+        let res = encode(&self.buf, &mut self.cobs_encoded);
+        self.cobs_encoded[res] = 0;
+        // &self.buf
+        &self.cobs_encoded[..=res]
     }
     pub fn new(mtu: u16) -> Self {
-        let mut buf = vec![0_u8; Into::<usize>::into(mtu)].into_boxed_slice();
+        const COBS_OVERHEAD: u16 = 2;
+        let mut buf = vec![0_u8; Into::<usize>::into(mtu - COBS_OVERHEAD)].into_boxed_slice();
+        let buf2 = vec![0_u8; max_encoding_length(buf.len())].into_boxed_slice();
         let l = buf.len() as u32;
         let length = &mut buf[4..8];
         length.copy_from_slice(&l.to_be_bytes());
@@ -131,7 +156,8 @@ impl FrameBuilder {
             counter: u32::MAX,
             buf: buf,
             start_time: Instant::now(),
-            total_send: 0
+            total_send: 0,
+            cobs_encoded: buf2,
         }
     }
     pub fn get_avg_kbps(&self) -> u64 {

@@ -2,7 +2,7 @@ use anyhow::{Error, Result};
 use net2::UdpBuilder;
 use std::net::{Ipv4Addr, UdpSocket};
 
-use super::{Receiver, Sender};
+use super::{Receiver, Sender, RECV_BUF};
 
 pub struct MulticastSender {
     socket: UdpSocket,
@@ -32,12 +32,13 @@ impl Sender for MulticastSender {
 
 pub struct MulticastReceiver {
     socket: UdpSocket,
+    buf: Box<[u8]>,
 }
 
 impl Receiver for MulticastReceiver {
-    fn recv<'a>(&mut self, buf: &'a mut [u8]) -> Result<&'a [u8]> {
-        let (size, _addr) = self.socket.recv_from(buf)?;
-        return Ok(&buf[..size]);
+    fn recv<'a>(&mut self) -> Result<&[u8]> {
+        let (size, _addr) = self.socket.recv_from(&mut self.buf)?;
+        return Ok(&self.buf[..size]);
     }
 }
 
@@ -50,6 +51,9 @@ impl MulticastReceiver {
         socket.reuse_address(true)?;
         let socket = socket.bind((bind, port))?;
         socket.join_multicast_v4(&grp, &bind)?;
-        Ok(Self { socket })
+        Ok(Self {
+            socket,
+            buf: vec![0; RECV_BUF].into_boxed_slice(),
+        })
     }
 }

@@ -1,54 +1,64 @@
-use anyhow::Result;
-use std::io::{Read, Write};
+use anyhow::{Error, Result};
+use std::io::{BufRead, Write};
 use std::net::Ipv4Addr;
 
+use std::io::{BufReader, BufWriter};
 use std::net::{TcpListener, TcpStream};
 
-use super::{Receiver, Sender};
+use super::{Receiver, Sender, RECV_BUF};
 
 pub struct TcpSender {
-    socket: TcpStream,
+    socket: BufWriter<TcpStream>,
 }
 
-/// Tcp sometimes incur losses on Windows. (investigate?)
 impl TcpSender {
     pub fn new(peer: Ipv4Addr, port: u16, _bind: Ipv4Addr) -> Result<Self> {
         let socket = TcpStream::connect((peer, port))?;
-        socket.set_nodelay(true)?; // might not be needed?
-        println!("Connected to {peer}:{port}");
-        Ok(Self { socket })
+        println!("Connected to server {peer}:{port}");
+        Ok(Self {
+            socket: BufWriter::new(socket),
+        })
     }
 }
 
 impl Sender for TcpSender {
     fn send(&mut self, data: &[u8]) -> Result<()> {
-        let _res = self.socket.write(data)?;
-        self.socket.flush()?; // might not be needed?
-        Ok(())
+        if let Err(e) = self.socket.write_all(data) {
+            println!("Disconnected from server. Reason: {e}");
+            Err(Error::from(e))
+        } else {
+            Ok(())
+        }
     }
 }
 
 pub struct TcpReceiver {
     socket: TcpListener,
-    connection: Option<TcpStream>,
+    connection: Option<BufReader<TcpStream>>,
+    buf: Vec<u8>,
 }
 
 impl Receiver for TcpReceiver {
-    fn recv<'a>(&mut self, buf: &'a mut [u8]) -> Result<&'a [u8]> {
-        if self.connection.is_none() {
-            let (conn, addr) = self.socket.accept()?;
-            self.connection = Some(conn);
-            println!("client connected: {addr}")
-        }
-        let mut conn = self.connection.take().unwrap();
-        let size = conn.read(buf);
-        self.connection = if size.is_err() {
-            println!("client disconnected");
-            None
+    fn recv<'a>(&mut self) -> Result<&[u8]> {
+        let mut conn = if let Some(conn) = self.connection.take() {
+            conn
         } else {
-            Some(conn)
+            let (conn, addr) = self.socket.accept()?;
+            println!("client connected: {addr}");
+            BufReader::new(conn)
         };
-        return Ok(&buf[..size?]);
+        self.buf.clear();
+        self.connection = match &conn.read_until(0, &mut self.buf) {
+            Err(e) => {
+                println!("client disconnected: {}", e);
+                None
+            }
+            Ok(_) => Some(conn),
+        };
+        if self.connection.is_none() {
+            return Err(Error::msg("connection is gone"));
+        }
+        return Ok(&self.buf[..]);
     }
 }
 
@@ -59,6 +69,7 @@ impl TcpReceiver {
         Ok(Self {
             socket: listener,
             connection: None,
+            buf: Vec::with_capacity(RECV_BUF),
         })
     }
 }

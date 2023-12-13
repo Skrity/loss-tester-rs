@@ -8,10 +8,15 @@ pub use unicast::{UnicastReceiver, UnicastSender};
 
 use anyhow::Result;
 
+/// Buffer size for receive operations
+///
+/// Correlates to MAX_FRAME_SIZE in protocols
+const RECV_BUF: usize = 65536;
+
 pub trait Sender {
     fn send(&mut self, data: &[u8]) -> Result<()>;
 }
 
 pub trait Receiver {
-    fn recv<'a>(&mut self, buf: &'a mut [u8]) -> Result<&'a [u8]>;
+    fn recv<'a>(&mut self) -> Result<&[u8]>;
 }

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::net::{Ipv4Addr, UdpSocket};
 
-use super::{Receiver, Sender};
+use super::{Receiver, Sender, RECV_BUF};
 
 pub struct UnicastSender {
     socket: UdpSocket,
@@ -24,12 +24,13 @@ impl Sender for UnicastSender {
 
 pub struct UnicastReceiver {
     socket: UdpSocket,
+    buf: Box<[u8]>,
 }
 
 impl Receiver for UnicastReceiver {
-    fn recv<'a>(&mut self, buf: &'a mut [u8]) -> Result<&'a [u8]> {
-        let (size, _addr) = self.socket.recv_from(buf)?;
-        return Ok(&buf[..size]);
+    fn recv<'a>(&mut self) -> Result<&[u8]> {
+        let (size, _addr) = self.socket.recv_from(&mut self.buf)?;
+        return Ok(&self.buf[..size]);
     }
 }
 
@@ -37,6 +38,7 @@ impl UnicastReceiver {
     pub fn new(bind: Ipv4Addr, port: u16) -> Result<Self> {
         Ok(Self {
             socket: UdpSocket::bind(&(bind, port))?,
+            buf: vec![0; RECV_BUF].into_boxed_slice(),
         })
     }
 }

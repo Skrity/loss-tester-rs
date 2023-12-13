@@ -9,13 +9,13 @@ use protocols::{
     MulticastReceiver, MulticastSender, Receiver, Sender, TcpReceiver, TcpSender, UnicastReceiver,
     UnicastSender,
 };
+#[allow(unused_imports)]
+use speed::{Limiter, OverTimeLimiter, StaticLimiter};
 use spin_sleep::sleep;
 use std::{
     net::Ipv4Addr,
     time::{Duration, Instant},
 };
-#[allow(unused_imports)]
-use speed::{Limiter, OverTimeLimiter, StaticLimiter};
 
 #[derive(Subcommand)]
 enum Commands {
@@ -74,9 +74,12 @@ struct Args {
     bind: Ipv4Addr,
 }
 
+/// Serial loop for receiving data on a Receiver implementer.
+///
+/// Reports stats every `report_interval`` second unless blocked.
+///
 fn reciever_loop(mut socket: impl Receiver, report_interval: u8) -> ! {
     let mut handler = FrameHandler::new();
-    let mut buf = [0_u8; 65536];
     let mut time = Instant::now();
     let report_interval = Duration::from_secs(report_interval.into());
     loop {
@@ -88,16 +91,19 @@ fn reciever_loop(mut socket: impl Receiver, report_interval: u8) -> ! {
             );
             time = Instant::now();
         }
-        if let Ok(data) = socket.recv(&mut buf) {
-            handler.handle(data);
+        if let Ok(data) = socket.recv() {
+            handler.handle(data)
         } else {
             handler.reset();
         }
-        sleep(Duration::from_micros(50));
+        sleep(Duration::from_micros(10));
     }
 }
 
-
+/// Serial loop for sending data over Sender implementer.
+///
+/// Takes `impl Limiter` for speed adjustment on the fly.
+///
 fn sender_loop(mut socket: impl Sender, mtu: u16, mut limiter: impl Limiter) -> ! {
     let mut builder = FrameBuilder::new(mtu);
     let mut time = Instant::now();
@@ -107,49 +113,79 @@ fn sender_loop(mut socket: impl Sender, mtu: u16, mut limiter: impl Limiter) -> 
             println!("Avg send speed: {} kbps", builder.get_avg_kbps());
             time = Instant::now();
         }
-        let data = builder.next();
-        let _ = &socket.send(data);
+        if let Err(_) = &socket.send(builder.next()) {
+            std::process::exit(1);
+        };
         sleep(limiter.sleep_interval());
     }
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    match args.r#type {
-        Commands::Server {
-            addr,
-            port,
-            interval,
-        } => {
-            match args.proto {
-                Proto::Multicast => {
-                    reciever_loop(MulticastReceiver::new(addr, port, args.bind)?, interval)
-                }
-                Proto::Unicast => reciever_loop(UnicastReceiver::new(addr, port)?, interval),
-                Proto::TCP => reciever_loop(TcpReceiver::new(addr, port)?, interval),
-            };
-        }
-        Commands::Client {
-            addr,
-            port,
-            mtu,
-            bandwidth,
-        } => match args.proto {
-            Proto::Multicast => sender_loop(
-                MulticastSender::new(addr, port, args.bind)?,
-                mtu - 28,
-                StaticLimiter::new(bandwidth, mtu),
-            ),
-            Proto::Unicast => sender_loop(
-                UnicastSender::new(addr, port, args.bind)?,
-                mtu - 28,
-                OverTimeLimiter::new(bandwidth, mtu),
-            ),
-            Proto::TCP => sender_loop(
-                TcpSender::new(addr, port, args.bind)?,
-                mtu - 40,
-                StaticLimiter::new(bandwidth, mtu),
-            ),
-        },
+    match (args.r#type, args.proto) {
+        (
+            Commands::Server {
+                addr,
+                port,
+                interval,
+            },
+            Proto::Multicast,
+        ) => reciever_loop(MulticastReceiver::new(addr, port, args.bind)?, interval),
+        (
+            Commands::Server {
+                addr,
+                port,
+                interval,
+            },
+            Proto::Unicast,
+        ) => reciever_loop(UnicastReceiver::new(addr, port)?, interval),
+        (
+            Commands::Server {
+                addr,
+                port,
+                interval,
+            },
+            Proto::TCP,
+        ) => reciever_loop(TcpReceiver::new(addr, port)?, interval),
+
+        (
+            Commands::Client {
+                addr,
+                port,
+                mtu,
+                bandwidth,
+            },
+            Proto::Multicast,
+        ) => sender_loop(
+            MulticastSender::new(addr, port, args.bind)?,
+            mtu - 28,
+            StaticLimiter::new(bandwidth, mtu),
+        ),
+        (
+            Commands::Client {
+                addr,
+                port,
+                mtu,
+                bandwidth,
+            },
+            Proto::Unicast,
+        ) => sender_loop(
+            UnicastSender::new(addr, port, args.bind)?,
+            mtu - 28,
+            OverTimeLimiter::new(bandwidth, mtu),
+        ),
+        (
+            Commands::Client {
+                addr,
+                port,
+                mtu,
+                bandwidth,
+            },
+            Proto::TCP,
+        ) => sender_loop(
+            TcpSender::new(addr, port, args.bind)?,
+            mtu - 40,
+            StaticLimiter::new(bandwidth, mtu),
+        ),
     }
 }
