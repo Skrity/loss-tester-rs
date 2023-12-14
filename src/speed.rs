@@ -1,5 +1,9 @@
+#![allow(dead_code)]
 /// Contains Speed Limiting strategies
-use std::time::{Duration, Instant};
+use std::{
+    ops::Range,
+    time::{Duration, Instant},
+};
 
 pub trait Limiter {
     fn sleep_interval(&mut self) -> Duration;
@@ -12,7 +16,6 @@ pub struct OverTimeLimiter {
     time: Instant,
 }
 
-#[allow(unused)]
 impl OverTimeLimiter {
     pub fn new(speed: u32, mtu: u16) -> Self {
         Self {
@@ -37,7 +40,7 @@ impl Limiter for OverTimeLimiter {
     }
 }
 
-/// Limit statically by user input
+/// Naive limiter relying on spinsleep
 pub struct StaticLimiter {
     dur: Duration,
 }
@@ -57,5 +60,46 @@ impl StaticLimiter {
 impl Limiter for StaticLimiter {
     fn sleep_interval(&mut self) -> Duration {
         self.dur
+    }
+}
+
+/// Bursty Limiter for optimal CPU usage, not unlike iperf
+pub struct BurstLimiter {
+    burst_window: Duration,
+    burst_count: usize,
+    state: Option<(Instant, Range<usize>)>,
+    disabled: bool,
+}
+
+impl BurstLimiter {
+    pub fn new(speed: u32, mtu: u16, burst_window: Duration) -> Self {
+        Self {
+            burst_window: burst_window,
+            burst_count: speed as usize * 1024 / 8 / mtu as usize,
+            state: None,
+            disabled: if speed == 0 { true } else { false },
+        }
+    }
+}
+
+impl Limiter for BurstLimiter {
+    fn sleep_interval(&mut self) -> Duration {
+        if self.disabled {
+            return Duration::ZERO; // no sleep while disabled
+        }
+        if let None = &mut self.state {
+            self.state = Some((Instant::now(), 0..self.burst_count));
+        }
+        if let Some((time, range)) = &mut self.state {
+            if let Some(_) = range.next() {
+                Duration::ZERO // no sleep while some bursts left
+            } else {
+                let time_left = self.burst_window - time.elapsed();
+                self.state = None;
+                time_left // Sleep all the time left
+            }
+        } else {
+            unreachable!(); // It's instantiated just before this block
+        }
     }
 }

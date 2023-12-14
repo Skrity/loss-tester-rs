@@ -10,7 +10,7 @@ use protocols::{
     UnicastSender,
 };
 #[allow(unused_imports)]
-use speed::{Limiter, OverTimeLimiter, StaticLimiter};
+use speed::{BurstLimiter, Limiter, OverTimeLimiter, StaticLimiter};
 use spin_sleep::sleep;
 use std::{
     net::Ipv4Addr,
@@ -42,7 +42,7 @@ enum Commands {
         port: u16,
 
         #[arg(short, long, default_value_t = 1000)]
-        /// Limit transmission bandwidth, kbit/s
+        /// Limit transmission bandwidth, kbit/s (0 to disable limiting)
         bandwidth: u32,
 
         #[arg(short, long, default_value_t = 1500)]
@@ -121,6 +121,7 @@ fn sender_loop(mut socket: impl Sender, mtu: u16, mut limiter: impl Limiter) -> 
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    const BURST_WINDOW: Duration = Duration::from_secs(1);
     match (args.r#type, args.proto) {
         (
             Commands::Server {
@@ -158,7 +159,7 @@ fn main() -> Result<()> {
         ) => sender_loop(
             MulticastSender::new(addr, port, args.bind)?,
             mtu - 28,
-            StaticLimiter::new(bandwidth, mtu),
+            BurstLimiter::new(bandwidth, mtu, BURST_WINDOW),
         ),
         (
             Commands::Client {
@@ -171,7 +172,7 @@ fn main() -> Result<()> {
         ) => sender_loop(
             UnicastSender::new(addr, port, args.bind)?,
             mtu - 28,
-            StaticLimiter::new(bandwidth, mtu),
+            BurstLimiter::new(bandwidth, mtu, BURST_WINDOW),
         ),
         (
             Commands::Client {
@@ -184,7 +185,7 @@ fn main() -> Result<()> {
         ) => sender_loop(
             TcpSender::new(addr, port, args.bind)?,
             mtu - 40,
-            StaticLimiter::new(bandwidth, mtu),
+            BurstLimiter::new(bandwidth, mtu, BURST_WINDOW),
         ),
     }
 }
