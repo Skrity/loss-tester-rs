@@ -63,19 +63,48 @@ impl Limiter for StaticLimiter {
     }
 }
 
+/// Useless Limiter, doesn't limit
+pub struct UnLimiter {}
+
+impl UnLimiter {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl Limiter for UnLimiter {
+    fn sleep_interval(&mut self) -> Duration {
+        Duration::ZERO
+    }
+}
+
 /// Bursty Limiter for optimal CPU usage, not unlike iperf
 pub struct BurstLimiter {
     burst_window: Duration,
-    burst_count: usize,
-    state: Option<(Instant, Range<usize>)>,
+    burst_count: u64,
+    state: Option<(Instant, Range<u64>)>,
     disabled: bool,
 }
 
 impl BurstLimiter {
-    pub fn new(speed: u32, mtu: u16, burst_window: Duration) -> Self {
+    pub fn new(speed: u32, mtu: u16, dynamic_window: bool) -> Self {
+        let frames_per_second = (Into::<u64>::into(speed) * (1024 / 8)) / Into::<u64>::into(mtu);
+        let window: u64 = if dynamic_window {
+            match frames_per_second {
+                0 => 1,
+                1..=99 => 1_000_000,
+                1..=999 => 100_000,
+                1000..=9999 => 10_000,
+                10000..=99999 => 100,
+                100000.. => 1,
+            }
+        } else {
+            1_000_000
+        };
+        println!("frames_per_second={frames_per_second}, window={window}");
         Self {
-            burst_window: burst_window,
-            burst_count: speed as usize * 1024 / 8 / mtu as usize,
+            burst_window: Duration::from_micros(window),
+            burst_count: frames_per_second / (1_000_000 / window),
             state: None,
             disabled: if speed == 0 { true } else { false },
         }
@@ -87,19 +116,18 @@ impl Limiter for BurstLimiter {
         if self.disabled {
             return Duration::ZERO; // no sleep while disabled
         }
-        if let None = &mut self.state {
-            self.state = Some((Instant::now(), 0..self.burst_count));
-        }
-        if let Some((time, range)) = &mut self.state {
-            if let Some(_) = range.next() {
-                Duration::ZERO // no sleep while some bursts left
-            } else {
-                let time_left = self.burst_window - time.elapsed();
-                self.state = None;
-                time_left // Sleep all the time left
-            }
+        let (time, mut range) = self
+            .state
+            .take()
+            .unwrap_or((Instant::now(), 0..self.burst_count));
+        if let Some(_) = range.next() {
+            self.state = Some((time, range));
+            Duration::ZERO // no sleep while some bursts left
         } else {
-            unreachable!(); // It's instantiated just before this block
+            self.state = None;
+            self.burst_window
+                .checked_sub(time.elapsed())
+                .unwrap_or(Duration::ZERO) // sleep all the remaining burst time
         }
     }
 }

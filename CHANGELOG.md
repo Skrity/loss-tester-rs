@@ -16,3 +16,8 @@
   * allows for serial TCP bitrate of 6gbps+
   * provides more efficient CPU usage
   * pushes more exact bitrate
+
+## 2023-12-15
+
+* Add dynamic window size for burst limiter
+  Allows for ~1gbps of lossless throughput on UDP

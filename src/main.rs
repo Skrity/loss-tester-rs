@@ -121,7 +121,6 @@ fn sender_loop(mut socket: impl Sender, mtu: u16, mut limiter: impl Limiter) -> 
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    const BURST_WINDOW: Duration = Duration::from_secs(1);
     match (args.r#type, args.proto) {
         (
             Commands::Server {
@@ -159,7 +158,7 @@ fn main() -> Result<()> {
         ) => sender_loop(
             MulticastSender::new(addr, port, args.bind)?,
             mtu - 28,
-            BurstLimiter::new(bandwidth, mtu, BURST_WINDOW),
+            BurstLimiter::new(bandwidth, mtu, true),
         ),
         (
             Commands::Client {
@@ -172,7 +171,7 @@ fn main() -> Result<()> {
         ) => sender_loop(
             UnicastSender::new(addr, port, args.bind)?,
             mtu - 28,
-            BurstLimiter::new(bandwidth, mtu, BURST_WINDOW),
+            BurstLimiter::new(bandwidth, mtu, true),
         ),
         (
             Commands::Client {
@@ -185,7 +184,7 @@ fn main() -> Result<()> {
         ) => sender_loop(
             TcpSender::new(addr, port, args.bind)?,
             mtu - 40,
-            BurstLimiter::new(bandwidth, mtu, BURST_WINDOW),
+            BurstLimiter::new(bandwidth, mtu, false),
         ),
     }
 }

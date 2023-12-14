@@ -61,7 +61,7 @@ impl FrameHandler {
         let Ok(counter) = TryInto::<[u8; 4]>::try_into(&frame[0..4]) else {
             self.statistics.invalid += 1;
             println!("Invalid because can't read counter");
-            return ()
+            return ();
         };
         let counter = u32::from_be_bytes(counter);
         match counter.cmp(&self.counter) {
@@ -174,6 +174,17 @@ mod tests {
         let mut builder = FrameBuilder::new(1500);
         for _ in (0..=u32::MAX).step_by(1) {
             assert_eq!(builder.next().len(), 1500)
+        }
+    }
+
+    #[test]
+    fn test_frame_by_frame() {
+        let mut builder = FrameBuilder::new(1500);
+        let mut handler = FrameHandler::new();
+        for i in 1..=5 {
+            let frame = builder.next();
+            handler.handle(frame);
+            assert_eq!(handler.get_statistics().valid, i)
         }
     }
 }

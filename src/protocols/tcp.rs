@@ -1,9 +1,7 @@
 use anyhow::{Error, Result};
-use std::io::{BufRead, Write};
-use std::net::Ipv4Addr;
 
-use std::io::{BufReader, BufWriter};
-use std::net::{TcpListener, TcpStream};
+use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::net::{Ipv4Addr, TcpListener, TcpStream};
 
 use super::{Receiver, Sender, RECV_BUF};
 
@@ -48,16 +46,15 @@ impl Receiver for TcpReceiver {
             BufReader::new(conn)
         };
         self.buf.clear();
-        self.connection = match &conn.read_until(0, &mut self.buf) {
+        let res = conn.read_until(0, &mut self.buf);
+        self.connection = match &res {
             Err(e) => {
                 println!("client disconnected: {}", e);
                 None
             }
             Ok(_) => Some(conn),
         };
-        if self.connection.is_none() {
-            return Err(Error::msg("connection is gone"));
-        }
+        res?;
         return Ok(&self.buf[..]);
     }
 }
