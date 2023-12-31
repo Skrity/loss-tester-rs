@@ -9,5 +9,7 @@ edition = "2021"
 anyhow = "1.0.75"
 clap = { version = "4.4.11", features = ["derive"] }
 cobs = "0.2.3"
+ctrlc = "3.4.2"
 net2 = "0.2.39"
 spin_sleep = "1.1.1"
+thiserror = "1.0.53"

@@ -3,6 +3,7 @@ use std::net::Ipv4Addr;
 use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Subcommand)]
+#[command(infer_subcommands = true)]
 pub enum Commands {
     /// Server mode
     Server {
@@ -38,8 +39,7 @@ pub enum Commands {
 
 #[derive(Clone, ValueEnum)]
 pub enum Proto {
-    Multicast,
-    Unicast,
+    UDP,
     TCP,
 }
 
@@ -50,7 +50,7 @@ pub struct Args {
     #[command(subcommand)]
     pub r#type: Commands,
 
-    #[arg(short='P', long, value_enum, default_value_t = Proto::Multicast)]
+    #[arg(short='P', long, value_enum, default_value_t = Proto::UDP)]
     /// Protocol to send data over
     pub proto: Proto,
 

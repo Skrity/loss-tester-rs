@@ -21,3 +21,13 @@
 
 * Add dynamic window size for burst limiter
   Allows for ~1gbps of lossless throughput on UDP
+
+## 2023-12-30
+
+* Change structure to allow for testing harness
+
+## 2023-12-31
+
+* Merge multicast and unicast to UDP
+* Add ProtoError enum to handle Sessions
+* Support sessions in UDP
