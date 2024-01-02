@@ -1,4 +1,7 @@
-use std::time::{Duration, Instant};
+use std::{
+    sync::{Arc, RwLock},
+    time::{Duration, Instant},
+};
 
 use anyhow::Result;
 use spin_sleep::sleep;
@@ -19,27 +22,47 @@ pub fn reciever_loop(
     report_interval: u8,
     shutdown: ShutdownReceiver,
 ) -> Result<()> {
-    let mut handler = FrameHandler::new();
-    let mut time = Instant::now();
-    let report_interval = Duration::from_secs(report_interval.into());
+    let handler = Arc::new(RwLock::new(FrameHandler::new()));
+    let print_killer = {
+        let handler = handler.clone();
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        std::thread::spawn(move || {
+            loop {
+                if rx.try_recv().is_ok() {
+                    return ();
+                }
+                {
+                    let guard = handler.read().unwrap();
+                    let stats = guard.get_statistics();
+                    if let Some(stats) = stats {
+                        let (avg, instant) = guard.get_speeds();
+                        println!("Lmao latency: {}us stats: {:?} speed: {avg}, {instant}", guard.get_latency(), stats)
+                    }
+                }
+                std::thread::sleep(Duration::from_secs(report_interval.into()));
+            }
+        });
+        tx
+    };
     loop {
         if shutdown.try_recv().is_ok() {
+            let _ = print_killer.send(());
             return Ok(());
         }
-        if time.elapsed() > report_interval {
-            println!(
-                "Avg receive speed: {} kbps \n{:?}",
-                handler.get_avg_kbps(),
-                handler.get_statistics()
-            );
-            time = Instant::now();
-        }
         match socket.recv() {
-            Ok(data) => handler.handle(data),
-            Err(ProtoError::Disconnected(_)) => handler.reset(),
-            Err(ProtoError::ConflictingClient(_)) => {}
-            Err(ProtoError::IOErr(err)) => {
-                eprintln!("Error receiving datagram: {err}")
+            Ok(data) => {
+                handler.write().unwrap().handle(data);
+            },
+            Err(ProtoError::Connected(peer)) => {
+                eprintln!("Connected: {peer}")
+            },
+            Err(ProtoError::Disconnected(peer)) => {
+                eprintln!("Disconnected: {peer}");
+                handler.write().unwrap().reset();
+            },
+            Err(ProtoError::IOErr(_)) => {},
+            Err(ProtoError::ConflictingClient(peer)) => {
+                eprintln!("Datagram from a different client ignored: {peer}");
             }
         }
     }

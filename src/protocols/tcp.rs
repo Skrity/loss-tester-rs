@@ -1,5 +1,5 @@
 use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::net::{Ipv4Addr, TcpListener, TcpStream};
+use std::net::{Ipv4Addr, TcpListener, TcpStream, SocketAddr};
 
 use super::{ProtoError, Receiver, Sender, RECV_BUF};
 
@@ -36,31 +36,25 @@ impl Drop for TcpSender {
 
 pub struct TcpReceiver {
     socket: TcpListener,
-    connection: Option<BufReader<TcpStream>>,
+    connection: Option<(BufReader<TcpStream>, SocketAddr)>,
     buf: Vec<u8>,
 }
 
 impl Receiver for TcpReceiver {
     fn recv<'a>(&mut self) -> Result<&[u8], ProtoError> {
-        let mut conn = if let Some(conn) = self.connection.take() {
-            conn
+        self.buf.clear();
+        if let Some((mut conn, addr)) = self.connection.take() {
+            if conn.read_until(0, &mut self.buf).is_err() || (self.buf.len() == 1 && self.buf[0] == 0) {
+                return Err(ProtoError::Disconnected(addr))
+            } else {
+                self.connection = Some((conn, addr));
+                return Ok(&self.buf[..]);
+            };
         } else {
             let (conn, addr) = self.socket.accept()?;
-            println!("client connected: {addr}");
-            BufReader::new(conn)
-        };
-        self.buf.clear();
-        let res = conn.read_until(0, &mut self.buf);
-        match &res {
-            Err(e) => {
-                println!("client disconnected: {}", e);
-                self.connection = None;
-                return Err(ProtoError::Disconnected(conn.get_ref().peer_addr()?));
-            }
-            Ok(_) => self.connection = Some(conn),
-        };
-        res?;
-        return Ok(&self.buf[..]);
+            self.connection = Some((BufReader::new(conn), addr));
+            return Err(ProtoError::Connected(addr));
+        }
     }
 }
 

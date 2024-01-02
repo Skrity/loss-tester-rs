@@ -1,6 +1,6 @@
 use cobs::{decode, encode, max_encoding_length};
 /// Module for frame generation and handling
-use std::time::Instant;
+use std::time::{Instant, Duration};
 
 /// Maximum possible size of one frame (MTU=u16::MAX)
 const MAX_FRAME_SIZE: usize = 65536;
@@ -12,9 +12,8 @@ const SEQUNCE: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 pub struct FrameHandler {
     counter: u32,
     statistics: FrameStatistics,
-    start_time: Option<Instant>,
-    total_received: u64,
     buf: Box<[u8]>,
+    speed_handler: SpeedMeasurer,
 }
 
 #[derive(Default, Debug)]
@@ -31,25 +30,21 @@ impl FrameHandler {
         Self {
             counter: u32::MAX,
             statistics: Default::default(),
-            start_time: None,
-            total_received: 0,
             buf: vec![0; MAX_FRAME_SIZE].into_boxed_slice(),
+            speed_handler: SpeedMeasurer::new(),
         }
     }
     pub fn reset(&mut self) {
         self.counter = u32::MAX;
         self.statistics = Default::default();
-        self.start_time = None;
+        self.speed_handler.reset();
     }
     /// Handle incoming frame
     ///
     /// Takes a null-terminated slice representing the whole frame
     pub fn handle(&mut self, frame: &[u8]) -> () {
-        if let None = self.start_time {
-            self.start_time = Some(Instant::now());
-        }
-        let length = frame.len();
-        let frame = &frame[..length - 1]; // Cut null-terminator
+        self.speed_handler.handle(frame.len());
+        let frame = frame.strip_prefix(&[0]).unwrap_or(frame);
         let frame = if let Ok(decoded_len) = decode(frame, &mut self.buf) {
             &self.buf[..decoded_len]
         } else {
@@ -88,7 +83,6 @@ impl FrameHandler {
             } else {
                 if &SEQUNCE[..i.len()] == i {
                     self.statistics.valid += 1;
-                    self.total_received += TryInto::<u64>::try_into(length).unwrap_or_default();
                     return ();
                 } else {
                     // println!("Improper end chunk");
@@ -98,19 +92,18 @@ impl FrameHandler {
         }
         self.statistics.internally_bad += 1;
     }
-    pub fn get_statistics(&self) -> &FrameStatistics {
-        &self.statistics
-    }
-    pub fn get_avg_kbps(&self) -> u64 {
-        if let Some(start_time) = self.start_time {
-            let dur = start_time.elapsed().as_secs();
-            if dur == 0 {
-                return 0;
-            }
-            (self.total_received / 1024) * 8 / dur
-        } else {
-            0
+    pub fn get_statistics(&self) -> Option<&FrameStatistics> {
+        if self.counter == u32::MAX {
+            return None
         }
+        Some(&self.statistics)
+    }
+    pub fn get_speeds(&self) -> (u64, u64) {
+        self.speed_handler.get_speeds()
+    }
+
+    pub fn get_latency(&self) -> u128 {
+        self.speed_handler.get_latency()
     }
 }
 
@@ -162,6 +155,75 @@ impl FrameBuilder {
     }
 }
 
+pub struct SpeedMeasurer {
+    session_start: Option<Instant>,
+    session_received: usize,
+    measure_start: Option<Instant>,
+    measure_received: usize,
+    measure_speed: u64,
+    measure_latencies: Vec<u128>,
+    prev_recv: Option<Instant>,
+}
+
+impl SpeedMeasurer {
+    pub fn new() -> Self {
+        Self {
+            session_start: None,
+            session_received: 1,
+            measure_start: None,
+            measure_received: 1,
+            measure_speed: 0,
+            measure_latencies: vec![],
+            prev_recv: None,
+        }
+    }
+
+    pub fn handle(&mut self, len: usize) {
+        let time = Instant::now();
+        let _session_start = self.session_start.get_or_insert(time);
+        self.session_received += len;
+        let measure_start = self.measure_start.get_or_insert(time);
+        if let Some(prev) = &mut self.prev_recv {
+            let latency = time.duration_since(*prev);
+            *prev = time;
+            if latency.as_millis() > 100 { // First in Burst
+                self.measure_latencies.clear();
+            } else {
+                self.measure_latencies.push(latency.as_micros());
+            }
+            // println!("latency for this packet = {}", latency.as_micros())
+        } else {
+            self.prev_recv = Some(time);
+        }
+        self.measure_received += len;
+        if measure_start.elapsed() >= Duration::from_millis(1000) {
+            self.measure_speed = (self.measure_received as u128 * 8 / 1024 * 1000 / measure_start.elapsed().as_millis()).try_into().unwrap();
+            *measure_start = Instant::now();
+            self.measure_received = 1;
+        };
+    }
+    pub fn get_speeds(&self) -> (u64, u64) {
+        if self.session_start.is_none() {return (0, 0)}
+        let avg_session_speed = self.session_received as u128 * 8 / 1024 * 1000 / self.session_start.unwrap().elapsed().as_millis();
+        return (avg_session_speed.try_into().unwrap_or(0), self.measure_speed)
+    }
+    pub fn reset(&mut self) {
+        self.session_start = None;
+        self.measure_start = None;
+        self.session_received = 1;
+        self.measure_received = 1;
+        self.measure_speed = 0;
+    }
+    pub fn get_latency(&self) -> u128 {
+        if self.measure_latencies.len() == 0 {
+            return 0
+        }
+        let sum: u128 = self.measure_latencies.iter().sum();
+        // / self.measure_latencies.len()
+        sum / self.measure_latencies.len() as u128
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,7 +246,7 @@ mod tests {
         for i in 1..=5 {
             let frame = builder.next();
             handler.handle(frame);
-            assert_eq!(handler.get_statistics().valid, i)
+            assert_eq!(handler.get_statistics().unwrap().valid, i)
         }
     }
 }

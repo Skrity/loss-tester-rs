@@ -31,3 +31,9 @@
 * Merge multicast and unicast to UDP
 * Add ProtoError enum to handle Sessions
 * Support sessions in UDP
+
+## 2024-01-02
+
+* Redo sessions for TCP and UDP
+* Move prints for receive to routines
+* Add speed measurement code, measure latency

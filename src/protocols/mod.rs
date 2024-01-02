@@ -23,6 +23,8 @@ pub trait Receiver {
 
 #[derive(Error, Debug)]
 pub enum ProtoError {
+    #[error("Client {0} connected")]
+    Connected(SocketAddr),
     #[error("Client {0} disconnected")]
     Disconnected(SocketAddr),
     #[error("Client {0} is not connected: datagram ignored")]

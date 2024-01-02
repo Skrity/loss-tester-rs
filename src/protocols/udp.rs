@@ -1,4 +1,3 @@
-// use anyhow::{Error, Result};
 use net2::UdpBuilder;
 use std::{
     net::{Ipv4Addr, SocketAddr, UdpSocket},
@@ -51,22 +50,21 @@ pub struct UdpReceiver {
 
 impl Receiver for UdpReceiver {
     fn recv<'a>(&mut self) -> Result<&[u8], ProtoError> {
-        let (size, addr) = self.socket.recv_from(&mut self.buf)?;
-        if self.client.is_none() {
-            println!("client connected: {addr}");
-            self.client = Some(addr)
+        if let Some(client) = self.client {
+            let (size, addr) = self.socket.recv_from(&mut self.buf)?;
+            if client != addr {
+                return Err(ProtoError::ConflictingClient(addr));
+            }
+            if size == 1 && self.buf[0] == 0 {
+                self.client = None;
+                return Err(ProtoError::Disconnected(addr));
+            }
+            return Ok(&self.buf[..size]);
+        } else {
+            let (_size, addr) = self.socket.peek_from(&mut self.buf)?;
+            self.client = Some(addr);
+            return Err(ProtoError::Connected(addr));
         }
-        if self.client != Some(addr) {
-            eprintln!("datagram from a different client received: ignored");
-            return Err(ProtoError::ConflictingClient(addr));
-        }
-        if size == 1 && self.buf[0] == 0 {
-            // Disconnect MSG
-            self.client = None;
-            println!("client disconnected: {addr}");
-            return Err(ProtoError::Disconnected(addr));
-        }
-        return Ok(&self.buf[..size]);
     }
 }
 
