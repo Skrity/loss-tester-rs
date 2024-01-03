@@ -26,6 +26,7 @@ pub fn reciever_loop(
     let print_killer = {
         let handler = handler.clone();
         let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let mut need_to_print_header = true;
         std::thread::spawn(move || {
             loop {
                 if rx.try_recv().is_ok() {
@@ -33,10 +34,20 @@ pub fn reciever_loop(
                 }
                 {
                     let guard = handler.read().unwrap();
-                    let stats = guard.get_statistics();
-                    if let Some(stats) = stats {
+                    if let Some(stats) = guard.get_statistics() {
+                        if need_to_print_header {
+                            need_to_print_header = false;
+                            println!("[ ID]    Latency      Bitrate   Sess.Avg. |Bad, Mangled|  Lost/Total")
+                        }
                         let (avg, instant) = guard.get_speeds();
-                        println!("Lmao latency: {}us stats: {:?} speed: {avg}, {instant}", guard.get_latency(), stats)
+                        let total = stats.valid + stats.invalid + stats.lost + stats.internally_bad;
+                        let invalid = stats.invalid;
+                        let internally_bad = stats.internally_bad;
+                        let lost = stats.lost;
+                        let percent = lost as f64 / total as f64 * 100_f64;
+                        println!("[{: >3}] {: >8}us {instant: >8}kbps {avg: >8}kbps {pad: >3}|{invalid}, {internally_bad}| {pad: >5}{lost}/{total} ({percent:.2}%)", stats.session_id, guard.get_latency(), pad="");
+                    } else {
+                        need_to_print_header = true;
                     }
                 }
                 std::thread::sleep(Duration::from_secs(report_interval.into()));
@@ -54,15 +65,22 @@ pub fn reciever_loop(
                 handler.write().unwrap().handle(data);
             },
             Err(ProtoError::Connected(peer)) => {
-                eprintln!("Connected: {peer}")
+                eprintln!("Peer connected: {peer}");
             },
             Err(ProtoError::Disconnected(peer)) => {
-                eprintln!("Disconnected: {peer}");
+                eprintln!("Peer disconnected: {peer}");
                 handler.write().unwrap().reset();
             },
-            Err(ProtoError::IOErr(_)) => {},
+            Err(ProtoError::IOErr(_err)) => {
+                // TODO: maybe nonblock, thonk
+                // if err.kind() == std::io::ErrorKind::WouldBlock {
+                //     std::thread::sleep(Duration::from_micros(1))
+                // } else {
+
+                // }
+            },
             Err(ProtoError::ConflictingClient(peer)) => {
-                eprintln!("Datagram from a different client ignored: {peer}");
+                eprintln!("Datagram from a different peer ignored: {peer}");
             }
         }
     }

@@ -16,8 +16,9 @@ pub struct FrameHandler {
     speed_handler: SpeedMeasurer,
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct FrameStatistics {
+    pub session_id: u64,
     pub valid: u64,
     pub invalid: u64,
     pub out_of_order: u64,
@@ -25,18 +26,31 @@ pub struct FrameStatistics {
     pub lost: u64,
 }
 
+impl FrameStatistics {
+    pub fn new(session_id: u64) -> Self {
+        Self {
+            session_id,
+            valid: 0,
+            invalid: 0,
+            out_of_order: 0,
+            internally_bad: 0,
+            lost: 0,
+        }
+    }
+}
+
 impl FrameHandler {
     pub fn new() -> Self {
         Self {
             counter: u32::MAX,
-            statistics: Default::default(),
+            statistics: FrameStatistics::new(1),
             buf: vec![0; MAX_FRAME_SIZE].into_boxed_slice(),
             speed_handler: SpeedMeasurer::new(),
         }
     }
     pub fn reset(&mut self) {
         self.counter = u32::MAX;
-        self.statistics = Default::default();
+        self.statistics = FrameStatistics::new(self.statistics.session_id + 1);
         self.speed_handler.reset();
     }
     /// Handle incoming frame
@@ -49,13 +63,13 @@ impl FrameHandler {
             &self.buf[..decoded_len]
         } else {
             self.statistics.invalid += 1;
-            println!("Invalid because can't decode");
+            // eprintln!("Invalid because can't decode");
             return ();
         };
         self.counter = self.counter.wrapping_add(1);
         let Ok(counter) = TryInto::<[u8; 4]>::try_into(&frame[0..4]) else {
             self.statistics.invalid += 1;
-            println!("Invalid because can't read counter");
+            // println!("Invalid because can't read counter");
             return ();
         };
         let counter = u32::from_be_bytes(counter);
@@ -63,6 +77,7 @@ impl FrameHandler {
             std::cmp::Ordering::Less => {
                 // println!("Behind");
                 self.statistics.out_of_order += 1;
+                eprintln!("Received an out of order packet");
                 self.counter = self.counter.wrapping_sub(1);
                 self.statistics.lost = self.statistics.lost.saturating_sub(1);
             }

@@ -37,3 +37,8 @@
 * Redo sessions for TCP and UDP
 * Move prints for receive to routines
 * Add speed measurement code, measure latency
+
+## 2024-01-03
+
+* Sort out printing of results
+* Support session id on Statistics struct
