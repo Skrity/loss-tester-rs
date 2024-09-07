@@ -1,6 +1,6 @@
 use cobs::{decode, encode, max_encoding_length};
 /// Module for frame generation and handling
-use std::time::{Instant, Duration};
+use std::time::{Duration, Instant};
 
 /// Maximum possible size of one frame (MTU=u16::MAX)
 const MAX_FRAME_SIZE: usize = 65536;
@@ -58,7 +58,7 @@ impl FrameHandler {
     /// Takes a null-terminated slice representing the whole frame
     pub fn handle(&mut self, frame: &[u8]) -> () {
         self.speed_handler.handle(frame.len());
-        let frame = frame.strip_prefix(&[0]).unwrap_or(frame);
+        let frame = frame.strip_suffix(&[0]).unwrap_or(frame);
         let frame = if let Ok(decoded_len) = decode(frame, &mut self.buf) {
             &self.buf[..decoded_len]
         } else {
@@ -109,7 +109,7 @@ impl FrameHandler {
     }
     pub fn get_statistics(&self) -> Option<&FrameStatistics> {
         if self.counter == u32::MAX {
-            return None
+            return None;
         }
         Some(&self.statistics)
     }
@@ -201,7 +201,8 @@ impl SpeedMeasurer {
         if let Some(prev) = &mut self.prev_recv {
             let latency = time.duration_since(*prev);
             *prev = time;
-            if latency.as_millis() > 100 { // First in Burst
+            if latency.as_millis() > 100 {
+                // First in Burst
                 self.measure_latencies.clear();
             } else {
                 self.measure_latencies.push(latency.as_micros());
@@ -212,15 +213,24 @@ impl SpeedMeasurer {
         }
         self.measure_received += len;
         if measure_start.elapsed() >= Duration::from_millis(1000) {
-            self.measure_speed = (self.measure_received as u128 * 8 / 1024 * 1000 / measure_start.elapsed().as_millis()).try_into().unwrap();
+            self.measure_speed = (self.measure_received as u128 * 8 / 1024 * 1000
+                / measure_start.elapsed().as_millis())
+            .try_into()
+            .unwrap();
             *measure_start = Instant::now();
             self.measure_received = 1;
         };
     }
     pub fn get_speeds(&self) -> (u64, u64) {
-        if self.session_start.is_none() {return (0, 0)}
-        let avg_session_speed = self.session_received as u128 * 8 / 1024 * 1000 / self.session_start.unwrap().elapsed().as_millis();
-        return (avg_session_speed.try_into().unwrap_or(0), self.measure_speed)
+        if self.session_start.is_none() {
+            return (0, 0);
+        }
+        let avg_session_speed = self.session_received as u128 * 8 / 1024 * 1000
+            / self.session_start.unwrap().elapsed().as_millis();
+        return (
+            avg_session_speed.try_into().unwrap_or(0),
+            self.measure_speed,
+        );
     }
     pub fn reset(&mut self) {
         self.session_start = None;
@@ -231,7 +241,7 @@ impl SpeedMeasurer {
     }
     pub fn get_latency(&self) -> u128 {
         if self.measure_latencies.len() == 0 {
-            return 0
+            return 0;
         }
         let sum: u128 = self.measure_latencies.iter().sum();
         // / self.measure_latencies.len()
