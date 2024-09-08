@@ -1,10 +1,12 @@
+mod async_tcp;
+mod async_udp;
 mod tcp;
 mod udp;
 
 use std::net::SocketAddr;
 
-pub use tcp::{TcpReceiver, TcpSender};
-pub use udp::{UdpReceiver, UdpSender};
+pub use async_tcp::{TcpReceiver, TcpSender};
+pub use async_udp::{UdpReceiver, UdpSender};
 
 use thiserror::Error;
 
@@ -18,7 +20,15 @@ pub trait Sender {
 }
 
 pub trait Receiver {
-    fn recv<'a>(&mut self) -> Result<&[u8], ProtoError>;
+    fn recv(&mut self) -> Result<&[u8], ProtoError>;
+}
+
+pub(crate) trait AsyncSender {
+    async fn send(&mut self, data: &[u8]) -> Result<(), ProtoError>;
+}
+
+pub(crate) trait AsyncReceiver {
+    async fn recv(&mut self) -> Result<&[u8], ProtoError>;
 }
 
 #[derive(Error, Debug)]

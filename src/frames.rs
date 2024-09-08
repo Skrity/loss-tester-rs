@@ -225,12 +225,13 @@ impl SpeedMeasurer {
         if self.session_start.is_none() {
             return (0, 0);
         }
-        let avg_session_speed = self.session_received as u128 * 8 / 1024 * 1000
-            / self.session_start.unwrap().elapsed().as_millis();
-        return (
+        let avg_session_speed = (self.session_received as u128 * 8 / 1024 * 1000)
+            .checked_div(self.session_start.unwrap().elapsed().as_millis())
+            .unwrap_or(0);
+        (
             avg_session_speed.try_into().unwrap_or(0),
             self.measure_speed,
-        );
+        )
     }
     pub fn reset(&mut self) {
         self.session_start = None;
