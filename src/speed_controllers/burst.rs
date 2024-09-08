@@ -20,7 +20,7 @@ impl BurstLimiter {
             match frames_per_second {
                 0 => 1,
                 1..=99 => 1_000_000,
-                1..=999 => 100_000,
+                100..=999 => 100_000,
                 1000..=9999 => 10_000,
                 10000..=99999 => 100,
                 100000.. => 1,
@@ -33,7 +33,7 @@ impl BurstLimiter {
             burst_window: Duration::from_micros(window),
             burst_count: frames_per_second / (1_000_000 / window),
             state: None,
-            disabled: if speed == 0 { true } else { false },
+            disabled: speed == 0,
         }
     }
 }
@@ -47,7 +47,7 @@ impl Limiter for BurstLimiter {
             .state
             .take()
             .unwrap_or((Instant::now(), 0..self.burst_count));
-        if let Some(_) = range.next() {
+        if range.next().is_some() {
             self.state = Some((time, range));
             Duration::ZERO // no sleep while some bursts left
         } else {

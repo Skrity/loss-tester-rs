@@ -56,7 +56,7 @@ impl FrameHandler {
     /// Handle incoming frame
     ///
     /// Takes a null-terminated slice representing the whole frame
-    pub fn handle(&mut self, frame: &[u8]) -> () {
+    pub fn handle(&mut self, frame: &[u8]) {
         self.speed_handler.handle(frame.len());
         let frame = frame.strip_suffix(&[0]).unwrap_or(frame);
         let frame = if let Ok(decoded_len) = decode(frame, &mut self.buf) {
@@ -64,13 +64,13 @@ impl FrameHandler {
         } else {
             self.statistics.invalid += 1;
             // eprintln!("Invalid because can't decode");
-            return ();
+            return;
         };
         self.counter = self.counter.wrapping_add(1);
         let Ok(counter) = TryInto::<[u8; 4]>::try_into(&frame[0..4]) else {
             self.statistics.invalid += 1;
             // println!("Invalid because can't read counter");
-            return ();
+            return;
         };
         let counter = u32::from_be_bytes(counter);
         match counter.cmp(&self.counter) {
@@ -84,7 +84,7 @@ impl FrameHandler {
             std::cmp::Ordering::Equal => {}
             std::cmp::Ordering::Greater => {
                 // println!("Ahead");
-                self.statistics.lost += Into::<u64>::into(counter - &self.counter);
+                self.statistics.lost += Into::<u64>::into(counter - self.counter);
                 self.counter = counter;
             }
         }
@@ -98,7 +98,7 @@ impl FrameHandler {
             } else {
                 if &SEQUNCE[..i.len()] == i {
                     self.statistics.valid += 1;
-                    return ();
+                    return;
                 } else {
                     // println!("Improper end chunk");
                     break;
@@ -241,7 +241,7 @@ impl SpeedMeasurer {
         self.measure_speed = 0;
     }
     pub fn get_latency(&self) -> u128 {
-        if self.measure_latencies.len() == 0 {
+        if self.measure_latencies.is_empty() {
             return 0;
         }
         let sum: u128 = self.measure_latencies.iter().sum();
