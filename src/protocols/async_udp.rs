@@ -1,11 +1,11 @@
+use super::{AsyncReceiver, AsyncSender, ProtoError, RECV_BUF};
 use net2::UdpBuilder;
-use smol::net::UdpSocket as async_socket;
+use smol::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
+use smol::{future::yield_now, net::UdpSocket as async_socket};
 use std::{
     net::{Ipv4Addr, SocketAddr, UdpSocket},
     time::Duration,
 };
-
-use super::{AsyncReceiver, AsyncSender, ProtoError, RECV_BUF};
 
 pub struct UdpSender(async_socket);
 
@@ -20,11 +20,11 @@ impl UdpSender {
             socket.connect((peer, port))?;
             socket
         } else {
-            let socket = UdpSocket::bind((bind, 0))?;
-            socket.connect((peer, port))?;
-            socket
+            let socket = smol::block_on(async_socket::bind((bind, 0)))?;
+            smol::block_on(socket.connect((peer, port)))?;
+            return Ok(Self(socket));
         };
-        Ok(Self(socket.try_into().unwrap()))
+        Ok(Self(socket.try_into()?))
     }
 }
 
@@ -74,14 +74,12 @@ impl UdpReceiver {
             socket.reuse_address(true)?;
             let socket = socket.bind((bind, port))?;
             socket.join_multicast_v4(&peer, &bind)?;
-            socket
+            socket.try_into()?
         } else {
-            UdpSocket::bind((bind, port))?
+            smol::block_on(async_socket::bind((bind, port)))?
         };
-        socket.set_read_timeout(Some(Duration::from_secs(1)))?;
-
         Ok(Self {
-            socket: socket.try_into().unwrap(),
+            socket,
             buf: vec![0; RECV_BUF].into_boxed_slice(),
             client: None,
         })

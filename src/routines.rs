@@ -147,9 +147,6 @@ pub(super) fn reciever_loop(
 #[cfg(feature = "async")]
 mod r#async {
     use super::*;
-    use smol::future::poll_once;
-    use smol::stream::StreamExt;
-    use smol::Timer;
 
     pub(super) async fn sender_loop_async(
         mut socket: impl AsyncSender,
@@ -158,21 +155,22 @@ mod r#async {
         shutdown: ShutdownReceiver,
     ) -> Result<()> {
         let mut builder = FrameBuilder::new(mtu);
-        let mut timer = Timer::interval(Duration::from_secs(1));
+        let mut timer = Instant::now();
         loop {
             if shutdown.try_recv().is_ok() {
                 return Ok(());
             }
-            if poll_once(timer.next()).await.is_some() {
+            let now = Instant::now();
+            if now.duration_since(timer).ge(&Duration::from_secs(1)) {
+                timer = now;
                 println!("Avg send speed: {} kbps", builder.get_avg_kbps());
             }
             if socket.send(builder.next()).await.is_err() {
                 return Ok(());
             };
-            let to_sleep = limiter.sleep_interval();
-            if to_sleep != Duration::ZERO {
-                Timer::after(to_sleep).await;
-            }
+            // bad for async but Timer doesn't do enough resolution for gbps
+            // fine since we block on in, but redo should this become a task
+            spin_sleep::sleep(limiter.sleep_interval())
         }
     }
 
@@ -187,13 +185,16 @@ mod r#async {
     ) -> Result<()> {
         let mut handler = FrameHandler::new();
         let mut need_to_print_header = true;
-        let mut timer = Timer::interval(Duration::from_secs(report_interval.into()));
+        let mut timer = Instant::now();
+        let report_interval = Duration::from_secs(report_interval.into());
         loop {
             if shutdown.try_recv().is_ok() {
                 return Ok(());
             }
-            if poll_once(timer.next()).await.is_some() {
+            let now = Instant::now();
+            if now.duration_since(timer).ge(&report_interval) {
                 if let Some(stats) = handler.get_statistics() {
+                    timer = now;
                     if need_to_print_header {
                         need_to_print_header = false;
                         println!(
@@ -211,29 +212,35 @@ mod r#async {
                     need_to_print_header = true;
                 }
             };
-            match poll_once(socket.recv()).await {
-                Some(Ok(data)) => {
+            let timeout = smol::future::FutureExt::race(socket.recv(), async {
+                smol::Timer::after(Duration::from_millis(100)).await;
+                Err(ProtoError::IOErr(std::io::Error::new(
+                    std::io::ErrorKind::WouldBlock,
+                    "ok",
+                )))
+            });
+            match timeout.await {
+                Ok(data) => {
                     handler.handle(data);
                 }
-                Some(Err(ProtoError::Connected(peer))) => {
+                Err(ProtoError::Connected(peer)) => {
                     eprintln!("Peer connected: {peer}");
                 }
-                Some(Err(ProtoError::Disconnected(peer))) => {
+                Err(ProtoError::Disconnected(peer)) => {
                     eprintln!("Peer disconnected: {peer}");
                     handler.reset();
                 }
-                Some(Err(ProtoError::IOErr(_err))) => {
-                    eprintln!("stuff happened: {_err}")
+                Err(ProtoError::IOErr(err)) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                    // UDP spams quite a lot of this on Windows
+                    std::thread::sleep(Duration::from_millis(1));
                 }
-                Some(Err(ProtoError::ConflictingClient(peer))) => {
+                Err(ProtoError::IOErr(err)) => {
+                    panic!("stuff happened: {err}, Kind: {:?}", err.kind());
+                }
+                Err(ProtoError::ConflictingClient(peer)) => {
                     eprintln!("Datagram from a different peer ignored: {peer}");
                 }
-                None => {
-                    Timer::after(Duration::from_millis(1)).await;
-                    continue;
-                }
             }
-            // yield_now().await; // ain't needed since we are blocking on this
         }
     }
 }

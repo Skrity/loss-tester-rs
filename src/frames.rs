@@ -83,7 +83,7 @@ impl FrameHandler {
             }
             std::cmp::Ordering::Equal => {}
             std::cmp::Ordering::Greater => {
-                // println!("Ahead");
+                eprintln!("lost frames: {}..={}", self.counter, counter);
                 self.statistics.lost += Into::<u64>::into(counter - self.counter);
                 self.counter = counter;
             }
