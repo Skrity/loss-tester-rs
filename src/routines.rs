@@ -147,7 +147,7 @@ pub(super) fn reciever_loop(
 #[cfg(feature = "async")]
 mod r#async {
     use super::*;
-    use smol::future::{poll_once, yield_now};
+    use smol::future::poll_once;
     use smol::stream::StreamExt;
     use smol::Timer;
 
@@ -233,7 +233,7 @@ mod r#async {
                     continue;
                 }
             }
-            yield_now().await;
+            // yield_now().await; // ain't needed since we are blocking on this
         }
     }
 }

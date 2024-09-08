@@ -44,7 +44,7 @@ struct TcpClient {
 
 pub struct TcpReceiver {
     socket: TcpListener,
-    connection: VecDeque<TcpClient>, // Can support multiple clients now, but routine still doesn't
+    connection: VecDeque<TcpClient>, // Can support multiple clients; but currently only accepts one
     buf: Vec<u8>,
 }
 
@@ -52,14 +52,8 @@ impl Receiver for TcpReceiver {
     async fn recv(&mut self) -> Result<&[u8], ProtoError> {
         self.buf.clear();
         loop {
-            if let Some(Ok((conn, addr))) = poll_once(self.socket.accept()).await {
-                self.connection.push_back(TcpClient {
-                    stream: BufReader::new(conn),
-                    addr,
-                    buf: vec![],
-                });
-                return Err(ProtoError::Connected(addr));
-            }
+            // This loop polls all TcpClients which we accepted, first done will be yielded
+            // At high throughput this will skew towards first client
             for (
                 index,
                 TcpClient {
@@ -67,13 +61,10 @@ impl Receiver for TcpReceiver {
                     addr,
                     buf,
                 },
-            ) in &mut self.connection.iter_mut().enumerate()
+            ) in self.connection.iter_mut().enumerate()
             {
                 match poll_once(conn.read_until(0, buf)).await {
-                    None => {
-                        yield_now().await;
-                        continue;
-                    } // try another
+                    None => {} // try another
                     Some(Ok(_)) if (!buf.is_empty() && buf[0] != 0) => {
                         std::mem::swap(&mut self.buf, buf);
                         return Ok(&self.buf[..]);
@@ -85,7 +76,20 @@ impl Receiver for TcpReceiver {
                     }
                 }
             }
-            yield_now().await; // yield between every
+            // Currently we accepts only one client
+            // Somehow this helps with bandwidth
+            if self.connection.is_empty() {
+                if let Some(Ok((conn, addr))) = poll_once(self.socket.accept()).await {
+                    self.connection.push_back(TcpClient {
+                        stream: BufReader::new(conn),
+                        addr,
+                        buf: vec![],
+                    });
+                    return Err(ProtoError::Connected(addr));
+                }
+            }
+            // if no client was ready or no connection was accepted - yield
+            yield_now().await;
         }
     }
 }
