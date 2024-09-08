@@ -1,12 +1,25 @@
+#![allow(unused)]
+
+#[cfg(feature = "async")]
 mod async_tcp;
+#[cfg(feature = "async")]
 mod async_udp;
+
+#[cfg(not(feature = "async"))]
 mod tcp;
+#[cfg(not(feature = "async"))]
 mod udp;
 
-use std::net::SocketAddr;
-
+#[cfg(feature = "async")]
 pub use async_tcp::{TcpReceiver, TcpSender};
+#[cfg(feature = "async")]
 pub use async_udp::{UdpReceiver, UdpSender};
+
+use std::net::SocketAddr;
+#[cfg(not(feature = "async"))]
+pub use tcp::{TcpReceiver, TcpSender};
+#[cfg(not(feature = "async"))]
+pub use udp::{UdpReceiver, UdpSender};
 
 use thiserror::Error;
 

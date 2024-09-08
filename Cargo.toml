@@ -11,6 +11,10 @@ clap = { version = "4.4.11", features = ["derive"] }
 cobs = "0.2.3"
 ctrlc = "3.4.2"
 net2 = "0.2.39"
-smol = "2.0.2"
+smol = { version = "2", optional = true }
 spin_sleep = "1.1.1"
 thiserror = "1.0.53"
+
+[features]
+default = ["async"]
+async = ["dep:smol"]

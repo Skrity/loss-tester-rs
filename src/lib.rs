@@ -27,16 +27,8 @@ pub fn entrypoint() -> Result<()> {
             port,
             interval,
         } => match args.proto {
-            Proto::UDP => smol::block_on(reciever_loop_async(
-                UdpReceiver::new(addr, port, args.bind)?,
-                interval,
-                rx,
-            )),
-            Proto::TCP => smol::block_on(reciever_loop_async(
-                TcpReceiver::new(addr, port)?,
-                interval,
-                rx,
-            )),
+            Proto::UDP => reciever_loop(UdpReceiver::new(addr, port, args.bind)?, interval, rx),
+            Proto::TCP => reciever_loop(TcpReceiver::new(addr, port)?, interval, rx),
         },
         Commands::Client {
             addr,
@@ -44,30 +36,30 @@ pub fn entrypoint() -> Result<()> {
             bandwidth,
             mtu,
         } => match (args.proto, bandwidth) {
-            (Proto::UDP, 0) => smol::block_on(sender_loop_async(
+            (Proto::UDP, 0) => sender_loop(
                 UdpSender::new(addr, port, args.bind)?,
                 mtu - 28,
                 BurstLimiter::new(1000, mtu, true),
                 rx,
-            )),
-            (Proto::TCP, 0) => smol::block_on(sender_loop_async(
+            ),
+            (Proto::TCP, 0) => sender_loop(
                 TcpSender::new(addr, port, args.bind)?,
                 mtu - 40,
                 UnLimiter::new(),
                 rx,
-            )),
-            (Proto::UDP, bandwidth) => smol::block_on(sender_loop_async(
+            ),
+            (Proto::UDP, bandwidth) => sender_loop(
                 UdpSender::new(addr, port, args.bind)?,
                 mtu - 28,
                 BurstLimiter::new(bandwidth, mtu, true),
                 rx,
-            )),
-            (Proto::TCP, bandwidth) => smol::block_on(sender_loop_async(
+            ),
+            (Proto::TCP, bandwidth) => sender_loop(
                 TcpSender::new(addr, port, args.bind)?,
                 mtu - 40,
                 BurstLimiter::new(bandwidth, mtu, false),
                 rx,
-            )),
+            ),
         },
     }
 }
