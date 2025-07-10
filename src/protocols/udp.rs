@@ -59,6 +59,9 @@ impl Receiver for UdpReceiver {
                 self.client = None;
                 return Err(ProtoError::Disconnected(addr));
             }
+            // if size == 2 && self.buf[0..1] == [0,0] {
+            //     return Err(ProtoError::BurstStarted);
+            // }
             return Ok(&self.buf[..size]);
         } else {
             let (_size, addr) = self.socket.peek_from(&mut self.buf)?;

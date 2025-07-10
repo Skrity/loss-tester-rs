@@ -59,13 +59,13 @@ impl FrameHandler {
     pub fn handle(&mut self, frame: &[u8]) {
         self.speed_handler.handle(frame.len());
         let frame = frame.strip_suffix(&[0]).unwrap_or(frame);
-        let frame = if let Ok(decoded_len) = decode(frame, &mut self.buf) {
-            &self.buf[..decoded_len]
-        } else {
-            self.statistics.invalid += 1;
-            // eprintln!("Invalid because can't decode");
-            return;
-        };
+        // let frame = if let Ok(decoded_len) = decode(frame, &mut self.buf) {
+        //     &self.buf[..decoded_len]
+        // } else {
+        //     self.statistics.invalid += 1;
+        //     // eprintln!("Invalid because can't decode");
+        //     return;
+        // };
         self.counter = self.counter.wrapping_add(1);
         let Ok(counter) = TryInto::<[u8; 4]>::try_into(&frame[0..4]) else {
             self.statistics.invalid += 1;
@@ -89,23 +89,7 @@ impl FrameHandler {
             }
         }
         let data = &frame[4..];
-        for i in data.chunks(SEQUNCE.len()) {
-            if i.len() == SEQUNCE.len() {
-                if i != SEQUNCE {
-                    // println!("Improper chunk");
-                    break;
-                }
-            } else {
-                if &SEQUNCE[..i.len()] == i {
-                    self.statistics.valid += 1;
-                    return;
-                } else {
-                    // println!("Improper end chunk");
-                    break;
-                }
-            }
-        }
-        self.statistics.internally_bad += 1;
+        self.statistics.valid += 1;
     }
     pub fn get_statistics(&self) -> Option<&FrameStatistics> {
         if self.counter == u32::MAX {

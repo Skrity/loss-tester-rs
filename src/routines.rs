@@ -146,6 +146,8 @@ pub(super) fn reciever_loop(
 
 #[cfg(feature = "async")]
 mod r#async {
+    use std::io::Write as _;
+
     use super::*;
 
     pub(super) async fn sender_loop_async(
@@ -187,6 +189,22 @@ mod r#async {
         let mut need_to_print_header = true;
         let mut timer = Instant::now();
         let report_interval = Duration::from_secs(report_interval.into());
+        let (tx, rx) = async_channel::unbounded::<Box<[u8]>>();
+        let mut file = std::io::BufWriter::new(std::fs::File::create("/tmp/lmao.buf").unwrap());
+        let mut len: usize = 0;
+        let _ = std::thread::spawn(move || loop {
+            match rx.recv_blocking() {
+                Ok(buf) => {
+                    len += buf.len() - 4;
+                    file.write_all(&buf[4..]).unwrap();
+                    if len >= 1024 * 1024 * 1024 {
+                        println!("done");
+                        return;
+                    }
+                }
+                Err(e) => panic!("{e}"),
+            }
+        });
         loop {
             if shutdown.try_recv().is_ok() {
                 return Ok(());
@@ -219,9 +237,12 @@ mod r#async {
                     "ok",
                 )))
             });
+
             match timeout.await {
                 Ok(data) => {
                     handler.handle(data);
+                    let res = tx.send(data.to_vec().into_boxed_slice()).await;
+                    res.unwrap();
                 }
                 Err(ProtoError::Connected(peer)) => {
                     eprintln!("Peer connected: {peer}");

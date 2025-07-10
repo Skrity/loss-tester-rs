@@ -72,7 +72,7 @@ impl UdpReceiver {
         let socket = if peer.is_multicast() {
             let socket = UdpBuilder::new_v4()?;
             socket.reuse_address(true)?;
-            let socket = socket.bind((bind, port))?;
+            let socket = socket.bind((Ipv4Addr::UNSPECIFIED, port))?;
             socket.join_multicast_v4(&peer, &bind)?;
             socket.try_into()?
         } else {

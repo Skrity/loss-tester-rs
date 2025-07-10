@@ -382,6 +382,7 @@ name = "loss-tester-rs"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-channel",
  "clap",
  "cobs",
  "ctrlc",
