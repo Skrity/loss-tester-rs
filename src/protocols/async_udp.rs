@@ -15,9 +15,9 @@ impl UdpSender {
             let socket = UdpBuilder::new_v4()?;
             // https://stackoverflow.com/questions/14388706/how-do-so-reuseaddr-and-so-reuseport-differ/14388707#14388707
             socket.reuse_address(true)?;
-            let socket = socket.bind((bind, 0))?;
+            let socket = socket.bind((bind, 0))?; // addr eth0 local
             socket.set_multicast_ttl_v4(1)?;
-            socket.connect((peer, port))?;
+            socket.connect((peer, port))?; // addr group; port group
             socket
         } else {
             let socket = smol::block_on(async_socket::bind((bind, 0)))?;
